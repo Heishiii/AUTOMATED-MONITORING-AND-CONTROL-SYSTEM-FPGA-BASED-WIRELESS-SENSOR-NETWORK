@@ -1,0 +1,717 @@
+ 
+
+module Oyster_Mushroom(
+
+								input clock,
+
+								//UART
+								input wire rx, start,
+								output tx,
+								
+								// SENSORS
+								input RTC, 
+								output Humidifier, Exhaust_Fan, Peltier, Pump, Growlights,
+								
+								// MAIN FUNCTION
+								input [1:0] DATA_SELECT
+								
+								
+								
+							
+								
+								
+);
+
+wire [7:0]DATA_Received;
+wire RX_DONE,TX_done;
+reg [7:0]DHT_Humidity,DSB_Temp,DHT_Temp;
+reg  DHT_ACTIVE;
+
+reg[25:0] clk_counter = 0;
+reg TX_activate = 1'b0;
+reg DELAY = 1'b0;
+wire [7:0]DATA_SEND;
+
+
+//wire TX;
+//reg TX = 1'b1; // THIS IS TEMPORARY REMOVE IF TX is FINAL
+//assign tx = TX;
+
+
+//================STATE================
+
+parameter HUMIDITY = 2'b01;
+parameter TEMP_DHT = 2'b10;
+parameter TEMP_DSB = 2'b11;
+localparam [7:0] INITIAL_VALUES = 8'b0;
+
+
+//=====================================
+
+initial begin 
+DHT_Humidity = INITIAL_VALUES;
+DSB_Temp = INITIAL_VALUES;
+DHT_Temp = INITIAL_VALUES;
+TX_activate = 1'b0;
+end
+
+
+
+always @(posedge clock) begin
+	
+
+    if (RX_DONE==1) begin
+        case (DATA_SELECT)
+            HUMIDITY: begin DHT_Humidity <= DATA_Received; DHT_ACTIVE <= 1'b1; DHT_Temp <= DHT_Temp; end
+            TEMP_DHT: begin DHT_Temp <= DATA_Received; DHT_ACTIVE <= 1'b0; DHT_Humidity <= DHT_Humidity;end 
+            TEMP_DSB: begin DSB_Temp <= DATA_Received;  DHT_ACTIVE <= 1'b0; DHT_Temp <=DHT_Temp; DHT_Humidity <=DHT_Humidity; end 
+            default: begin DHT_ACTIVE <= 1'b0; DHT_Temp <=DHT_Temp; DHT_Humidity <=DHT_Humidity; end
+		  endcase 
+    end
+	 
+	
+	 
+end 
+	
+always @(posedge clock) begin
+	if ( DHT_Humidity > 0 && TX_done == 0) begin TX_activate = 1'b1; end
+		else begin TX_activate = 1'b0; end  
+/*
+	if (TX_done == 1 || DELAY == 1) begin
+			if (clk_counter < 26'd50_000_000)
+			begin
+				clk_counter = clk_counter + 1;
+			end
+			else begin clk_counter = 0; DELAY = 0; end
+	end
+	
+	else begin 
+	
+	
+	end
+*/
+
+	
+
+end
+	
+
+
+
+	RX RX_NAME(
+		 .clock(clock),
+       .i_rx(rx),
+		 .start(start),
+       .o_data_byte(DATA_Received),
+		 .done(RX_DONE)
+		 
+    );
+	
+
+ 
+	 SENSOR SENSOR_NAME( 
+		.DHT_Temp(DHT_Temp),
+		.DSB_Temp(DSB_Temp),
+		.DHT_Humidity(DHT_Humidity),
+		.RTC(RTC),
+		.clock(clock),
+		.DHT_ACTIVE (DHT_ACTIVE),
+		.Humidifier(Humidifier),
+		.Exhaust_Fan(Exhaust_Fan), 
+		.Peltier(Peltier), 
+		.Pump(Pump), 
+		.Growlights(Growlights)						 
+	);
+	
+	wire [7:0]TEST;
+	LINEAR LINEAR_NAME(
+     .clock(clock),
+	  .DHT_Temp(DHT_Temp),
+     .DHT_Humidity(DHT_Humidity),
+	  .yield(DATA_SEND)  
+	);
+	
+	
+	
+
+	
+	
+	 TX TX_NAME (
+	  .clk(clock),
+	  .activate(TX_activate), 
+	  .data(DATA_SEND),
+	  .tx(tx),
+	  .done(TX_done)
+	  
+	 );
+
+
+
+
+endmodule
+
+
+//==========================SENSOR======================================
+
+module SENSOR (	 	input [7:0] DHT_Temp,
+							 input [7:0] DSB_Temp,
+							 input [7:0] DHT_Humidity,
+							 input RTC,clock,DHT_ACTIVE,
+							 output Humidifier, Exhaust_Fan, Peltier, Pump, Growlights
+							 
+							
+							 
+);
+
+
+// ==================== PARAMETERS =============================
+parameter DHT_Temp_HIGH = 8'd28;
+parameter DHT_Temp_OPT = 8'd23;
+parameter DHT_HUMID_LOW = 8'd90; // MAIN VALUE FOR THESIS
+parameter DSB_Temp_HIGH = 8'd24;
+parameter DSB_Temp_OPT = 8'd21;
+parameter ON = 1'b0;
+parameter OFF = 1'b1;
+
+// ==================== END =============================
+
+// ==================== REGISTERS =============================
+
+reg register_Humidifier = OFF;
+reg register_Exhaust_Fan = OFF;
+reg register_Peltier = OFF;
+reg register_Pump = OFF;
+reg STOP_PUMP = OFF;
+reg register_Growlights = OFF;
+reg [25:0]COUNT = 0;
+reg [4:0]SEC = 0;
+
+// ==================== END =============================
+
+// ==================== OUTPUT =============================
+assign	Humidifier = register_Humidifier;
+assign	Exhaust_Fan = register_Exhaust_Fan;
+assign	Peltier = register_Peltier;
+assign	Pump = register_Pump;
+assign	Growlights = register_Growlights; 
+
+
+// ==================== END =============================
+
+always @(posedge clock) begin
+if (DHT_ACTIVE==1) begin
+		 if ( DHT_Humidity < DHT_HUMID_LOW && DHT_Humidity > 1'b0 ) begin 
+        register_Humidifier <= ON;
+    end 
+	 
+	 else if (DHT_Humidity >DHT_HUMID_LOW) begin
+        register_Humidifier <= OFF;
+		  
+    end 
+end
+end
+
+
+always @(posedge clock) begin
+	
+	if (register_Pump == ON) begin 
+		if (COUNT < 26'd50_000_000) begin
+			COUNT <= COUNT +1;
+		end
+	
+		else begin COUNT  <= 0; 
+			if (SEC < 4'd15)begin
+				SEC <= SEC +1; 
+			end
+			else begin SEC <= 0;
+				if (register_Pump == ON) begin 
+						register_Pump <= !register_Pump;
+						STOP_PUMP <= ON;
+				end
+			end
+		end
+	end
+	 
+    if (DHT_Temp > DHT_Temp_HIGH) begin
+			
+        register_Exhaust_Fan <= ON;
+		  
+		  if(STOP_PUMP == OFF)begin
+        register_Pump <= ON;
+		  end
+		  	  
+    end 
+	 else if (DHT_Temp == DHT_Temp_OPT) begin
+        register_Exhaust_Fan <= OFF;
+        register_Pump <= OFF;
+		  STOP_PUMP <= OFF;
+		  
+    end 
+	 else if (DHT_Temp < DHT_Temp_HIGH && DHT_Temp > DHT_Temp_OPT) begin
+		  STOP_PUMP <= OFF;
+	 end
+	
+    if (DSB_Temp > DSB_Temp_HIGH) begin
+        register_Peltier <= ON;
+    end 
+	 
+	 else if (DSB_Temp == DSB_Temp_OPT) begin
+        register_Peltier <= OFF;
+    end
+
+    if (RTC == ON) begin
+        register_Growlights <= ON;
+    end 
+	 
+	 else begin
+        register_Growlights <= OFF;
+    end
+	 
+	 
+   
+end
+
+always @ (posedge clock) begin 
+	
+end
+endmodule
+
+// =========================== RX ==========================
+module RX (input clock,
+                 input i_rx, start,
+                 output [7:0] o_data_byte,
+					  output done
+                );
+    
+    parameter IDLE_STATE    = 2'b00;
+    parameter START_STATE   = 2'b01;
+    parameter GET_BIT_STATE = 2'b10;
+    parameter STOP_STATE    = 2'b11;
+	 parameter CLKS_PER_BIT = 5208; // 5208 CLKS = 9600 Baud Rate (1 CYCLE of 8 bits)
+	 // TEST 52 CLOCKS 1 CYCLE (8 bits)
+	 //115200 = 434 clks
+    
+    reg rx_buffer;
+    reg rx;
+	 reg DONE;
+	 
+    reg [1:0] state  /*synthesis preserve*/   ;
+    reg [15:0] counter  ;
+    reg [2:0] bit_index ;
+    reg [7:0] data_byte ;
+	 reg [7:0] DATA; 
+    
+    assign o_data_byte  = DATA;
+	 assign done = DONE;
+	 
+	 
+	 reg [2:0]DATA_PLACEMENT_INDEX,Count ;
+	 
+	 reg [3:0]RAM[0:2];
+	
+	 
+	 
+	 initial begin
+	 data_byte = 0;
+	 rx_buffer = 1'b1;
+	 rx        = 1'b1;
+	 state     = 0;
+	 DONE 	  = 0;
+    counter[15:0]  = 0;
+    bit_index = 0;
+	 DATA = 0;
+	 DATA_PLACEMENT_INDEX =0;
+	 Count = 0;
+	 RAM[0] = 0; 
+	 RAM[1] = 0;
+	 RAM[2] = 0;
+	 end
+    
+    always @(i_rx)
+    begin
+	 
+        rx_buffer = i_rx;
+        rx        = rx_buffer;
+    end
+	 
+
+    
+always @(posedge clock)
+	begin
+	if (start == 1) begin
+        case (state)
+            IDLE_STATE:
+            begin
+                counter    = 0;
+                bit_index  = 0;
+                if (rx == 0) 
+                    state = START_STATE;
+                else
+                    state = IDLE_STATE;
+            end
+            
+            START_STATE:
+            begin
+              //===============================
+                 if (counter < (CLKS_PER_BIT - 1)/2)
+                begin
+                  
+                    counter = counter + 1;
+                    state   = START_STATE;
+                end                
+                else
+                  begin 
+                    counter = 0;
+                    state   = GET_BIT_STATE;
+                  end
+            end
+            
+            GET_BIT_STATE:
+            begin
+                if (counter < CLKS_PER_BIT - 1)
+                begin
+							
+                    counter = counter + 1;
+                    state   = GET_BIT_STATE;
+						 
+                end
+                else
+						begin
+							
+							counter              = 0;
+							data_byte[bit_index] = rx;
+							if (bit_index < 7)
+								begin
+									bit_index = bit_index + 1;
+									state     = GET_BIT_STATE;
+								end
+                    else
+						  //START TO CHECK IF EOL RECEIVED
+                    begin
+								if (data_byte == 8'b0000_1010 || data_byte == 8'b0000_1101 ) // READ IF EOL or NULL
+								begin 
+								
+								
+									// TESTED AND WORKED
+									// DO NOT TOUCH!!
+							/*#1*/ if(Count == 3) begin
+							
+										DATA = RAM[0]* 8'd100;
+										DATA = DATA + (RAM[1]*8'd10);
+										DATA = DATA + RAM[2];
+										
+									end
+							/*#2*/ else if (Count == 2) begin
+										DATA = RAM[0]*8'd10;
+										DATA = DATA + RAM[1];
+										
+									end
+							/*#3*/ else begin
+										DATA = RAM[0];
+									
+									end 
+									DATA_PLACEMENT_INDEX = 0;
+									Count = 0;
+									DONE = 1;
+									RAM[0] = 0;
+									RAM[1] = 0;
+									RAM[2] = 0;
+									if (data_byte == 8'b0000_1010 ) begin Count =0; end
+									// END OF TEST!!!	
+								end
+							// START OF STORING DATA TO OUTPUT
+							else if (data_byte >= 8'b0011_0000 && data_byte <= 8'b0011_1001) begin
+									DONE = 0;
+									RAM[DATA_PLACEMENT_INDEX] = data_byte[3:0]; // WORKING FINE! CHECKED NANI!!
+									Count = Count + 1;
+									if(DATA_PLACEMENT_INDEX < 2) begin DATA_PLACEMENT_INDEX = DATA_PLACEMENT_INDEX + 1; end
+							end
+                       bit_index = 0;
+                       state     = STOP_STATE;
+                    end
+                end
+            end
+            
+            STOP_STATE:
+            begin
+                if (counter < CLKS_PER_BIT - 1)
+                begin
+                    counter = counter + 1;
+                    state   = STOP_STATE;
+                end
+                else
+                begin
+                    counter    = 0;
+                    state      = IDLE_STATE;
+						  
+						  DATA=0;
+						  
+                end
+            end
+            
+            default:
+            state = IDLE_STATE;
+        endcase
+    end	 
+	 end
+endmodule
+
+// ================END OF RX ============================
+
+// ====================== TX ===========================
+module TX(
+    input clk,
+    input wire activate, 
+    input wire [7:0] data,
+    output reg tx, done
+);
+
+reg [2:0] state; 
+reg [2:0] bit_index;
+ wire [7:0] tx_data ;  // Changed from wire to reg
+reg active;
+
+parameter IDLE = 3'd0;
+parameter START = 3'd1;
+parameter TRANSMIT = 3'd2;
+parameter STOP = 3'd3;
+parameter CLEANUP = 3'd4;
+
+// 50 MHz Clk, 9600 Baud Rate
+parameter CLKS_PER_BIT = 5208;
+reg [15:0] clk_counter = 0;
+
+initial state = IDLE; // Ensure state is initialized
+assign tx_data = data;
+
+
+always @(posedge clk) begin
+    case (state)
+        IDLE: begin
+            tx = 1;
+            done = 0;
+            bit_index = 0;
+
+            if (activate == 1) begin
+              //  tx_data <= data; // Assign tx_data correctly
+                state <= START;
+            end
+        end
+
+        START: begin
+            tx = 0;
+            if (clk_counter < CLKS_PER_BIT - 1) begin
+                clk_counter = clk_counter + 1;
+            end else begin
+                clk_counter = 0;
+                state <= TRANSMIT;
+            end
+        end
+
+        TRANSMIT: begin
+            tx = tx_data[bit_index];
+
+            if (clk_counter < CLKS_PER_BIT - 1) begin
+                clk_counter = clk_counter + 1;
+            end else begin
+                clk_counter = 0;
+                if (bit_index < 7) begin
+                    bit_index = bit_index + 1;
+                end else begin
+                    state <= STOP;
+                end
+            end
+        end
+
+        STOP: begin
+            tx = 1;
+            if (clk_counter < CLKS_PER_BIT - 1) begin
+                clk_counter = clk_counter + 1;
+            end else begin
+                clk_counter = 0;
+                done = 1;
+                state <= CLEANUP;
+            end
+        end
+
+        CLEANUP: begin
+            tx = 1;
+            done = 1;
+            state <= IDLE;
+        end
+
+        default: state <= IDLE;
+    endcase
+end
+
+endmodule
+
+// ================END OF TX ============================
+
+//==================LINEAR REGRESSION ===================
+
+`include "Addition_Subtraction.v"
+`include "Multiplication.v"
+`include "Division.v"
+`include "InttoFloat.v"
+
+
+module LINEAR(
+     input clock,
+	 input wire [7:0] DHT_Temp,
+    input wire [7:0] DHT_Humidity,
+    output wire [7:0] yield   
+);
+		
+
+	wire [31:0] temp_weight = 32'b 00111111011011001100110011011000; // ACTUAL VALUE 0.92500067
+	 wire [31:0] hum_weight = 32'b 00111111011111100010010111111101 ; // TEST VALUE  0.99276716
+	 wire [31:0] bias = 32'b 00111100110011001100111000111110; // ACTUAL BIAS 0.025000688
+	 
+	 wire[31:0] float_DHT_Temp,
+					float_DHT_Humidity,
+					float_yield;
+	 
+	 wire[31:0] MULTIPLY_OUT_TEMP, 
+					MULTIPLY_OUT_Humidity,
+					ADD_OUT_LINEAR;
+				
+					
+	
+	parameter [3:0]add = 4'd10;
+	parameter [3:0]multiply = 4'd1;
+//=================================================
+
+	InttoFloat IF_temperature(DHT_Temp,float_DHT_Temp);
+	InttoFloat IF_humidity(DHT_Humidity,float_DHT_Humidity);
+	
+	
+	IEEE754 TEMP_LINEAR( float_DHT_Temp, temp_weight, multiply, MULTIPLY_OUT_TEMP);
+	
+	IEEE754 HUMIDTY_LINEAR( float_DHT_Humidity, hum_weight, multiply, MULTIPLY_OUT_Humidity);
+	
+	IEEE754 ADD_LINEAR( MULTIPLY_OUT_TEMP, MULTIPLY_OUT_Humidity,add,ADD_OUT_LINEAR);
+	IEEE754 ADD_BIAS( ADD_OUT_LINEAR, bias,add,float_yield);
+	
+	wire [7:0] TEST;
+	
+	FloattoInt toINT(clock,float_yield,yield);
+	
+	
+		
+
+	
+	
+//=================================================
+
+
+
+endmodule
+
+//==================END==================================
+
+
+module IEEE754(
+	input [31:0] a_operand,
+	input [31:0] b_operand,
+	input [3:0] Operation,
+	output [31:0] ALU_Output
+	);
+
+wire Exception,Overflow,Underflow;
+
+wire [31:0] Add_Sub_A,Add_Sub_B,Mul_A,Mul_B,Div_A,Div_B;
+
+wire Add_Sub_Exception,Mul_Exception,Mul_Overflow,Mul_Underflow,Div_Exception;
+
+wire [31:0] Add_Sub_Output,Mul_Output,Div_Output;
+
+wire AddBar_Sub;
+
+
+
+
+
+assign {Add_Sub_A,Add_Sub_B,AddBar_Sub} = (Operation == 4'd10) ? {a_operand,b_operand,1'b0} : 64'dz; // ADD
+
+assign {Mul_A,Mul_B} = (Operation == 4'd1) ? {a_operand,b_operand} : 64'dz;
+
+assign {Div_A,Div_B} = (Operation == 4'd2) ? {a_operand,b_operand}	: 64'dz;
+
+assign {Add_Sub_A,Add_Sub_B,AddBar_Sub} = (Operation == 4'd3) ? {a_operand,b_operand,1'b1} : 64'dz; // SUBTRACT
+
+
+
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Addition_Subtraction AuI(Add_Sub_A,Add_Sub_B,AddBar_Sub,Add_Sub_Exception,Add_Sub_Output);
+
+Multiplication MuI(Mul_A,Mul_B,Mul_Exception,Mul_Overflow,Mul_Underflow,Mul_Output);
+
+Division DuI(Div_A,Div_B,Div_Exception,Div_Output);
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+assign {Exception,Overflow,Underflow,ALU_Output} = (Operation == 4'd10) ? {Add_Sub_Exception,1'b0,1'b0,Add_Sub_Output}	: 35'dz;
+
+assign {Exception,Overflow,Underflow,ALU_Output} = (Operation == 4'd1) ? {Mul_Exception,Mul_Overflow,Mul_Underflow,Mul_Output}	: 35'dz;
+
+assign {Exception,Overflow,Underflow,ALU_Output} = (Operation == 4'd2) ? {Div_Exception,1'b0,1'b0,Div_Output}	: 35'dz;
+
+assign {Exception,Overflow,Underflow,ALU_Output} = (Operation == 4'd3) ? {Add_Sub_Exception,1'b0,1'b0,Add_Sub_Output}	: 35'dz;
+
+
+
+
+
+endmodule
+
+
+module FloattoInt (
+    input clock,
+    input wire [31:0] ieee_754,  // Input IEEE-754 single-precision floating-point number
+    output reg [7:0] out_8bit // Output 8-bit integer value
+);
+    
+    wire sign;
+    reg [7:0] exponent;   // Signed to handle negative values
+    wire [22:0] mantissa;
+    reg [7:0] int_value/*synthesis preserve*/;
+    reg [7:0] BIAS_REMOVE = 8'd127;
+	 
+	 reg [7:0] DEDUCT = 8'd23;
+	 reg [7:0] test;
+    
+    assign sign = ieee_754[31];
+    assign mantissa = ieee_754[22:0];
+
+		
+    always @(posedge clock) begin
+			exponent = ieee_754[30:23]- BIAS_REMOVE;
+			 
+			   //>> mantissa;
+        if (exponent < 0) begin
+            out_8bit = 8'd10; // Too small to represent as integer
+        end else if (exponent > 7) begin
+            out_8bit = 8'd255; // Clamp to 255 if out of range
+        end else begin
+            // Extract integer value (assuming implicit leading 1 in normalized form)
+            int_value = (1 << exponent  ) | mantissa >> (DEDUCT - exponent) ;
+          
+            
+            
+        end
+		  out_8bit = sign ? 8'b0 : (int_value > 8'd255 ? 8'd255 : int_value);
+    end
+endmodule
+
+
